@@ -14,6 +14,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+import xgboost as xgb
 
 # Sampling techniques
 from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE
@@ -51,6 +52,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 print(f"  Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 print(f"  Default rate (train): {y_train.mean():.2%}, (test): {y_test.mean():.2%}")
 
+# Calculate scale weight for cost-sensitive learning
+count_neg = np.sum(y_train == 0)
+count_pos = np.sum(y_train == 1)
+scale_weight = count_neg / count_pos
+print(f"  Class imbalance ratio: 1:{scale_weight:.2f}")
+print(f"  Computed scale_pos_weight for XGBoost: {scale_weight:.4f}")
+
 # Define sampling techniques
 samplers = {
     "None": None,
@@ -68,6 +76,8 @@ classifiers = {
     "RF": RandomForestClassifier(n_estimators=200, max_depth=20, class_weight='balanced', n_jobs=-1, random_state=42),
     "ExtraTrees": ExtraTreesClassifier(n_estimators=800, max_depth=20, class_weight='balanced', n_jobs=-1, random_state=42),
     "GradBoosting": GradientBoostingClassifier(n_estimators=200, max_depth=5, learning_rate=0.1, random_state=42),
+    "XGB_Baseline": xgb.XGBClassifier(objective='binary:logistic', n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42, n_jobs=-1, eval_metric='logloss'),
+    "XGB_CostSensitive": xgb.XGBClassifier(scale_pos_weight=scale_weight, objective='binary:logistic', n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42, n_jobs=-1, eval_metric='logloss'),
 }
 
 results = []
@@ -98,6 +108,13 @@ for sampler_name, sampler in samplers.items():
         f1 = f1_score(y_test, y_pred, zero_division=0)
         auc = roc_auc_score(y_test, y_proba)
         
+        # Business metrics
+        cm = confusion_matrix(y_test, y_pred)
+        tn, fp, fn, tp = cm.ravel()
+        missed_defaults = fn  # Critical business metric
+        caught_defaults = tp
+        false_alarms = fp
+        
         results.append({
             'Sampler': sampler_name,
             'Classifier': clf_name,
@@ -106,6 +123,13 @@ for sampler_name, sampler in samplers.items():
             'Recall': rec,
             'F1': f1,
             'AUC': auc,
+            'TN': tn,
+            'FP': fp,
+            'FN': fn,
+            'TP': tp,
+            'Missed_Defaults': missed_defaults,
+            'Caught_Defaults': caught_defaults,
+            'False_Alarms': false_alarms,
         })
         
         print(f"{sampler_name:20} + {clf_name:15} | Acc: {acc:.4f} | Prec: {prec:.4f} | Rec: {rec:.4f} | F1: {f1:.4f} | AUC: {auc:.4f}")
@@ -237,11 +261,108 @@ for threshold in np.arange(0.1, 0.9, 0.05):
 print(f"\nBest threshold (F1): {best_f1_thresh:.2f} with F1={best_f1_score:.4f}")
 
 print("\n" + "=" * 80)
-print("ANALYSIS COMPLETE!")
+print("BUSINESS IMPACT ANALYSIS")
+print("=" * 80)
+
+# Find best and worst for business metrics
+best_recall = results_df.loc[results_df['Recall'].idxmax()]
+worst_fn = results_df.loc[results_df['Missed_Defaults'].idxmin()]
+best_accuracy = results_df.loc[results_df['Accuracy'].idxmax()]
+
+print("\n1. BEST FOR CATCHING DEFAULTS (Highest Recall):")
+print(f"   Model: {best_recall['Sampler']} + {best_recall['Classifier']}")
+print(f"   Recall: {best_recall['Recall']:.4f} | Accuracy: {best_recall['Accuracy']:.4f}")
+print(f"   Missed Defaults: {best_recall['Missed_Defaults']:.0f} | Caught Defaults: {best_recall['Caught_Defaults']:.0f}")
+print(f"   False Alarms: {best_recall['False_Alarms']:.0f}")
+
+print("\n2. BEST FOR ACCURACY (Lowest False Positives):")
+print(f"   Model: {best_accuracy['Sampler']} + {best_accuracy['Classifier']}")
+print(f"   Accuracy: {best_accuracy['Accuracy']:.4f} | Recall: {best_accuracy['Recall']:.4f}")
+print(f"   Missed Defaults: {best_accuracy['Missed_Defaults']:.0f} | Caught Defaults: {best_accuracy['Caught_Defaults']:.0f}")
+print(f"   False Alarms: {best_accuracy['False_Alarms']:.0f}")
+
+# Compare XGBoost baseline vs cost-sensitive
+xgb_baseline_results = results_df[(results_df['Classifier'] == 'XGB_Baseline') & (results_df['Sampler'] == 'None')]
+xgb_costsens_results = results_df[(results_df['Classifier'] == 'XGB_CostSensitive') & (results_df['Sampler'] == 'None')]
+
+if len(xgb_baseline_results) > 0 and len(xgb_costsens_results) > 0:
+    print("\n" + "=" * 80)
+    print("COST-SENSITIVE LEARNING ANALYSIS (XGBoost Baseline vs Cost-Sensitive)")
+    print("=" * 80)
+    
+    baseline = xgb_baseline_results.iloc[0]
+    costsens = xgb_costsens_results.iloc[0]
+    
+    print("\n📊 PERFORMANCE COMPARISON:")
+    print("-" * 80)
+    print(f"{'Metric':<20} | {'Baseline':<12} | {'Cost-Sensitive':<12} | {'Change':<15}")
+    print("-" * 80)
+    
+    metrics_compare = ['Accuracy', 'Precision', 'Recall', 'F1', 'AUC']
+    for metric in metrics_compare:
+        base_val = baseline[metric]
+        cost_val = costsens[metric]
+        change = cost_val - base_val
+        pct_change = (change / base_val * 100) if base_val != 0 else 0
+        symbol = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+        print(f"{metric:<20} | {base_val:<12.4f} | {cost_val:<12.4f} | {change:+.4f} ({pct_change:+.1f}%) {symbol}")
+    
+    print("\n💼 BUSINESS IMPACT COMPARISON:")
+    print("-" * 80)
+    print(f"{'Business Metric':<25} | {'Baseline':<10} | {'Cost-Sensitive':<10} | {'Improvement':<15}")
+    print("-" * 80)
+    
+    fn_reduction = baseline['Missed_Defaults'] - costsens['Missed_Defaults']
+    fn_reduction_pct = (fn_reduction / baseline['Missed_Defaults'] * 100) if baseline['Missed_Defaults'] != 0 else 0
+    print(f"{'Missed Defaults (FN)':<25} | {baseline['Missed_Defaults']:<10.0f} | {costsens['Missed_Defaults']:<10.0f} | {fn_reduction:+.0f} ({fn_reduction_pct:+.1f}%) {'✅' if fn_reduction > 0 else '❌'}")
+    
+    tp_increase = costsens['Caught_Defaults'] - baseline['Caught_Defaults']
+    tp_increase_pct = (tp_increase / baseline['Caught_Defaults'] * 100) if baseline['Caught_Defaults'] != 0 else 0
+    print(f"{'Caught Defaults (TP)':<25} | {baseline['Caught_Defaults']:<10.0f} | {costsens['Caught_Defaults']:<10.0f} | {tp_increase:+.0f} ({tp_increase_pct:+.1f}%) {'✅' if tp_increase > 0 else '❌'}")
+    
+    fp_increase = costsens['False_Alarms'] - baseline['False_Alarms']
+    fp_increase_pct = (fp_increase / baseline['False_Alarms'] * 100) if baseline['False_Alarms'] != 0 else 0
+    print(f"{'False Alarms (FP)':<25} | {baseline['False_Alarms']:<10.0f} | {costsens['False_Alarms']:<10.0f} | {fp_increase:+.0f} ({fp_increase_pct:+.1f}%) {'⚠️' if fp_increase > 0 else '✅'}")
+    
+    print("\n💰 BUSINESS RECOMMENDATION:")
+    print("-" * 80)
+    if fn_reduction > 0 and fn_reduction_pct > 30:
+        print("✅ STRONG RECOMMENDATION: Use Cost-Sensitive XGBoost")
+        print(f"   • Catches {fn_reduction:.0f} MORE defaults ({fn_reduction_pct:.1f}% improvement)")
+        print(f"   • Recall improves from {baseline['Recall']:.1%} to {costsens['Recall']:.1%}")
+        print(f"   • Trade-off: {fp_increase:.0f} more false alarms, accuracy drops {abs(costsens['Accuracy'] - baseline['Accuracy']):.1%}")
+        print("   • For risk-averse business: THIS IS THE WINNER! 🏆")
+    elif fn_reduction > 0:
+        print("⚠️  CONDITIONAL RECOMMENDATION: Consider business context")
+        print(f"   • Cost-Sensitive catches {fn_reduction:.0f} more defaults")
+        print(f"   • Evaluate cost of {fp_increase:.0f} additional false alarms")
+    else:
+        print("❌ Standard baseline performs better for this dataset")
+
+print("\n" + "=" * 80)
+print("FINAL ANALYSIS COMPLETE!")
 print("=" * 80)
 print("\nSummary:")
 print(f"  Best single model: {best_sampler_name} + {best_clf_name}")
 print(f"    - Accuracy: {best_model_row['Accuracy']:.4f}")
-print(f"    - Best ensemble (soft voting): Accuracy {acc_vs:.4f}")
-print(f"    - Best ensemble (stacking): Accuracy {acc_stack:.4f}")
-print(f"\nRecommendation: Use {best_clf_name} with {best_sampler_name} sampling, tuned at threshold {best_f1_thresh:.2f}")
+print(f"    - Recall: {best_model_row['Recall']:.4f}")
+print(f"    - Missed Defaults: {best_model_row['Missed_Defaults']:.0f}")
+print(f"\n  Best for catching defaults: {best_recall['Sampler']} + {best_recall['Classifier']}")
+print(f"    - Recall: {best_recall['Recall']:.4f}")
+print(f"    - Missed Defaults: {best_recall['Missed_Defaults']:.0f} (LOWEST!)")
+print(f"\n  Best ensemble (soft voting): Accuracy {acc_vs:.4f}")
+print(f"  Best ensemble (stacking): Accuracy {acc_stack:.4f}")
+
+if len(xgb_baseline_results) > 0 and len(xgb_costsens_results) > 0:
+    baseline = xgb_baseline_results.iloc[0]
+    costsens = xgb_costsens_results.iloc[0]
+    if costsens['Missed_Defaults'] < baseline['Missed_Defaults']:
+        print(f"\n🎯 RECOMMENDED: XGB_CostSensitive (No Sampling) - catches {baseline['Missed_Defaults'] - costsens['Missed_Defaults']:.0f} more defaults!")
+    else:
+        print(f"\n🎯 RECOMMENDED: Use {best_clf_name} with {best_sampler_name} sampling")
+else:
+    print(f"\n🎯 RECOMMENDED: Use {best_clf_name} with {best_sampler_name} sampling, tuned at threshold {best_f1_thresh:.2f}")
+
+# Save detailed results
+results_df_sorted.to_csv('comprehensive_results_with_business_impact.csv', index=False)
+print("\n💾 Results saved to: comprehensive_results_with_business_impact.csv")

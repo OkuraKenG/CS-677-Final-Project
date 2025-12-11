@@ -1,23 +1,35 @@
 # Comprehensive Approach Testing Results
 
 ## Executive Summary
-Tested **30 combinations** of sampling methods + classifiers to identify the best approach for credit default prediction.
+Tested **42 combinations** of sampling methods + classifiers, including **cost-sensitive XGBoost**, to identify the best approach for credit default prediction.
+
+### 🏆 BREAKTHROUGH: Cost-Sensitive Learning Winner
+
+**RECOMMENDED MODEL:**
+- **XGBoost Cost-Sensitive (no sampling) with scale_pos_weight=3.52**
+- Accuracy: 76.32%, Precision: 47.3%, **Recall: 61.48%**, **F1: 0.5346**, AUC: 0.7716
+- **Business Impact: Catches 523 MORE defaults (40.5% improvement)**
+- **Estimated Savings: $5.23M+ in prevented losses**
 
 ### Key Findings
 
-**Best Single Model:**
-- **GradBoosting (no sampling)**
-- Accuracy: **81.79%** (improved from 81.48%)
-- Precision: 66.0%, Recall: 36.5%, F1: 0.4698, AUC: 0.7681
+**Best for Accuracy:**
+- **XGB_Baseline (no sampling)**: 81.82% accuracy
+- But misses 1,290 defaults
+
+**Best for Business (Catching Defaults):**
+- **XGB_CostSensitive (no sampling)**: 61.48% recall, 0.5346 F1
+- Misses only 767 defaults (vs 1,290 for baseline)
+- **523 fewer missed defaults = $5.23M savings**
 
 **Best by Metric:**
-| Metric | Approach | Score |
-|--------|----------|-------|
-| Accuracy | None + GradBoosting | 81.79% |
-| Precision | None + LR | 70.27% |
-| Recall | BorderlineSMOTE + LR | 68.81% |
-| F1 Score | RandomUndersampling + ExtraTrees | 0.5334 |
-| AUC | None + GradBoosting | 0.7681 |
+| Metric | Approach | Score | Missed Defaults |
+|--------|----------|-------|-----------------|
+| Accuracy | None + XGB_Baseline | 81.82% | 1,290 |
+| Precision | None + LR | 70.27% | 1,516 |
+| Recall | RandomUndersampling + XGB_CostSensitive | 94.98% | 100 (!) |
+| F1 Score | **None + XGB_CostSensitive** | **0.5346** | **767** ✅ |
+| AUC | None + XGB_Baseline | 0.7723 | 1,290 |
 
 **Ensemble Methods (no sampling baseline):**
 - Voting Classifier (Soft): 81.64% accuracy
@@ -26,20 +38,48 @@ Tested **30 combinations** of sampling methods + classifiers to identify the bes
 
 ---
 
+## Cost-Sensitive Learning Analysis
+
+### XGBoost Baseline vs Cost-Sensitive Comparison
+
+| Metric | XGB Baseline | XGB Cost-Sensitive | Change |
+|--------|--------------|-------------------|--------|
+| Accuracy | 81.82% | 76.32% | -5.5% ↓ |
+| Precision | 66.95% | 47.30% | -29.4% ↓ |
+| **Recall** | 35.21% | **61.48%** | **+74.6%** ↑ |
+| **F1 Score** | 46.15% | **53.46%** | **+15.8%** ↑ |
+| AUC | 0.7723 | 0.7716 | -0.1% ≈ |
+
+### Business Impact
+
+| Business Metric | Baseline | Cost-Sensitive | Improvement |
+|----------------|----------|----------------|-------------|
+| **Missed Defaults (FN)** | 1,290 | **767** | **-523 (-40.5%)** ✅ |
+| **Caught Defaults (TP)** | 701 | **1,224** | **+523 (+74.6%)** ✅ |
+| False Alarms (FP) | 346 | 1,364 | +1,018 (+294%) ⚠️ |
+
+**Financial Impact (assuming $10K loss per default):**
+- Baseline losses: $12.9M
+- Cost-Sensitive losses: $7.67M
+- **Net Savings: $5.23M (40.5% reduction)**
+
+---
+
 ## Detailed Results Table (Top 10 by Accuracy)
 
-| Sampler | Classifier | Accuracy | Precision | Recall | F1 | AUC |
-|---------|-----------|----------|-----------|--------|-----|-----|
-| None | GradBoosting | 81.79% | 0.660 | 0.3646 | 0.4698 | 0.7681 |
-| None | SVM | 81.40% | 0.661 | 0.3270 | 0.4375 | 0.7124 |
-| None | RF | 80.94% | 0.601 | 0.4108 | 0.4882 | 0.7614 |
-| None | LR | 80.92% | 0.703 | 0.2386 | 0.3562 | 0.7125 |
-| SMOTETomek | GradBoosting | 80.74% | 0.589 | 0.4274 | 0.4955 | 0.7562 |
-| ADASYN | GradBoosting | 80.68% | 0.586 | 0.4304 | 0.4964 | 0.7528 |
-| SMOTE | GradBoosting | 80.58% | 0.584 | 0.4254 | 0.4922 | 0.7588 |
-| BorderlineSMOTE | GradBoosting | 79.78% | 0.553 | 0.4490 | 0.4956 | 0.7541 |
-| None | ExtraTrees | 79.77% | 0.547 | 0.4922 | 0.5184 | 0.7654 |
-| SMOTE | ExtraTrees | 79.72% | 0.544 | 0.5103 | 0.5268 | 0.7648 |
+| Sampler | Classifier | Accuracy | Precision | Recall | F1 | AUC | Missed Defaults |
+|---------|-----------|----------|-----------|--------|-----|-----|-----------------|
+| None | **XGB_Baseline** | **81.82%** | 0.6695 | 0.3521 | 0.4615 | **0.7723** | 1,290 |
+| None | GradBoosting | 81.79% | 0.660 | 0.3646 | 0.4698 | 0.7681 | 1,265 |
+| None | SVM | 81.40% | 0.661 | 0.3270 | 0.4375 | 0.7124 | 1,340 |
+| None | RF | 80.94% | 0.601 | 0.4108 | 0.4882 | 0.7614 | 1,173 |
+| None | LR | 80.92% | 0.703 | 0.2386 | 0.3562 | 0.7125 | 1,516 |
+| SMOTETomek | GradBoosting | 80.74% | 0.589 | 0.4274 | 0.4955 | 0.7562 | 1,140 |
+| ADASYN | GradBoosting | 80.68% | 0.586 | 0.4304 | 0.4964 | 0.7528 | 1,134 |
+| SMOTE | GradBoosting | 80.58% | 0.584 | 0.4254 | 0.4922 | 0.7588 | 1,144 |
+| BorderlineSMOTE | GradBoosting | 79.78% | 0.553 | 0.4490 | 0.4956 | 0.7541 | 1,097 |
+| None | ExtraTrees | 79.77% | 0.547 | 0.4922 | 0.5184 | 0.7654 | 1,011 |
+| None | **XGB_CostSensitive** | 76.32% | 0.4730 | **0.6148** | **0.5346** | 0.7716 | **767** ✅
 
 ---
 
