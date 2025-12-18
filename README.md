@@ -45,6 +45,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Please also install graphviz (https://graphviz.org/).
+
 2. Run the primary notebooks:
 - `final_machine_learning_project_ashutosh.ipynb` — narrative flow and business-oriented analysis
 - `ML_Final_Project.ipynb` — full technical experiments
