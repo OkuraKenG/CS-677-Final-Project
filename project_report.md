@@ -14,6 +14,8 @@
 
 This project addresses the critical business problem of predicting credit card defaults using machine learning techniques. We developed and evaluated six different ML algorithms on the UCI Credit Card Default dataset (30,000 customers, 48 engineered features). Our analysis demonstrates that **XGBoost with Cost-Sensitive Learning** achieves the best balance between precision and recall, reducing missed defaults by **41.0%** compared to standard approaches, translating to potential savings of **$3.43 million** annually.
 
+> **Note on reproducibility:** The `Experiments/` folder contains the canonical runs and result tables (e.g., `APPROACH_TESTING_RESULTS.md`, `cost_sensitive_experiment_results.md`). Some experiments report metrics under a 70/30 split and others under an 80/20 split; small variations in numeric summaries are due to differing splits or hyperparameter variants. The key recommendations (cost-sensitive XGBoost and the observed performance ceiling) are consistent across all runs.
+
 ---
 
 ## 1. Problem Statement & Business Context
@@ -259,6 +261,18 @@ The high cost of missed defaults makes **recall** the critical metric, requiring
 - False Positives increased slightly (1,476 → 1,544)
 - Additional cost: 68 × $200 = $13,600
 - **Net Savings: $3,416,400 per year**
+
+### Sampling Strategy Analysis (Why Synthetic Sampling Was Not Ideal)
+**Key points:**
+- **Temporal & Feature Consistency:** The dataset contains sequential payment and bill features (PAY_0..PAY_6, BILL_AMT*, PAY_AMT*) with strong temporal correlation. Off-the-shelf synthetic methods (SMOTE/ADASYN) interpolate in feature space and can produce unrealistic sequences that violate temporal relationships and derived constraints (e.g., payment > bill inconsistently), causing models to learn artefacts rather than true risk patterns.
+
+- **Moderate Imbalance Ratio:** The class ratio (~3.52:1) is not extremely skewed. Objective-level adjustments (`scale_pos_weight`, class weights) preserve the natural distribution and yielded better test-set generalization than aggressive oversampling.
+
+- **Noise Amplification:** ADASYN targets borderline minority points; when minority labels or borderline features include noise, ADASYN magnifies those noisy regions and raises false positives on held-out data.
+
+- **Empirical Evidence:** In our experiments, SMOTE/ADASYN sometimes raised cross-validation recall, but **decreased test-set F1** and increased false positives, while `scale_pos_weight` improved recall with more stable test performance.
+
+**Recommendation:** Prefer cost-sensitive learning (XGBoost `scale_pos_weight` or class_weight adjustments). If oversampling is used, do so on aggregated risk features (that preserve temporal relationships) or consider domain-aware synthetic generation that enforces feature constraints.
 
 ---
 
